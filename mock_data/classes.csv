@@ -1,0 +1,31 @@
+name,major,code,x,y
+Calculus I,MATH,101,0.1,0.9
+Introduction to Programming,CS,102,0.1,0.85
+Microeconomics,ECON,103,0.7,0.75
+World History Survey,HIST,104,0.75,0.5
+Drawing Fundamentals,ART,55,0.3,0.1
+Creative Writing I,ENG,105,0.9,0.2
+Introduction to Philosophy,PHIL,106,0.8,0.7
+Ballet Technique I,DANCE,52,0.15,0.05
+Linear Algebra,MATH,190,0.05,0.95
+Data Structures,CS,195,0.1,0.9
+Macroeconomics,ECON,192,0.7,0.8
+Modern European History,HIST,185,0.8,0.6
+Sculpture I,ART,80,0.2,0.15
+Victorian Literature,ENG,197,0.95,0.2
+Ethics,PHIL,188,0.75,0.8
+Modern Dance II,DANCE,125,0.2,0.1
+Abstract Algebra,MATH,250,0.05,0.98
+Algorithms,CS,270,0.15,0.95
+Econometrics,ECON,280,0.85,0.85
+US Foreign Policy,HIST,215,0.8,0.7
+Oil Painting III,ART,230,0.35,0.1
+Shakespeare,ENG,245,0.9,0.25
+Metaphysics,PHIL,260,0.8,0.9
+Choreography Workshop,DANCE,205,0.25,0.15
+Differential Equations,MATH,220,0.1,0.9
+Database Systems,CS,150,0.1,0.8
+Game Theory,ECON,210,0.8,0.9
+Ancient Civilizations,HIST,60,0.65,0.4
+Digital Photography,ART,115,0.3,0.2
+Technical Writing,ENG,160,0.9,0.7
