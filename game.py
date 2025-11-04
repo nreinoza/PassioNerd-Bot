@@ -55,18 +55,16 @@ class Game():
         # --- Rule 1: Class code > 110 and <= 200 ---
         if 110 < target_code <= 200:
             # Need at least 3 courses taken from that major
-            required_count = 3
-            return len(major_classes_taken) >= required_count
+            return len(major_classes_taken) >= PREREQ_MIN
         
         # --- Rule 2: Class code > 200 ---
         elif target_code > 200:
             # Need at least 3 courses taken from that major with code > 110
-            required_count = 3
             
             # Filter the major classes taken further by code > 110
             advanced_major_classes_taken = major_classes_taken[major_classes_taken['code'] > 110]
             
-            return len(advanced_major_classes_taken) >= required_count
+            return len(advanced_major_classes_taken) >= PREREQ_MIN
         
         # --- Default Case: Class code <= 110 ---
         # No complex prerequisites are required for lower-level courses
