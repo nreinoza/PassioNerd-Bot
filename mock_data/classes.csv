@@ -1,31 +1,31 @@
 id,name,major,code,units,x,y
-0,Calculus I,MATH,101,5,0.1,0.9
-1,Introduction to Programming,CS,102,4,0.1,0.85
-2,Microeconomics,ECON,103,4,0.7,0.75
-3,World History Survey,HIST,104,3,0.75,0.5
-4,Drawing Fundamentals,ART,55,3,0.3,0.1
-5,Creative Writing I,ENG,105,4,0.9,0.2
-6,Introduction to Philosophy,PHIL,106,4,0.8,0.7
-7,Ballet Technique I,DANCE,52,3,0.15,0.05
-8,Linear Algebra,MATH,190,5,0.05,0.95
-9,Data Structures,CS,195,4,0.1,0.9
-10,Macroeconomics,ECON,192,4,0.7,0.8
-11,Modern European History,HIST,185,3,0.8,0.6
-12,Sculpture I,ART,80,3,0.2,0.15
-13,Victorian Literature,ENG,197,4,0.95,0.2
-14,Ethics,PHIL,188,4,0.75,0.8
-15,Modern Dance II,DANCE,125,3,0.2,0.1
-16,Abstract Algebra,MATH,250,5,0.05,0.98
-17,Algorithms,CS,270,4,0.15,0.95
-18,Econometrics,ECON,280,4,0.85,0.85
-19,US Foreign Policy,HIST,215,3,0.8,0.7
-20,Oil Painting III,ART,230,3,0.35,0.1
-21,Shakespeare,ENG,245,4,0.9,0.25
-22,Metaphysics,PHIL,260,4,0.8,0.9
-23,Choreography Workshop,DANCE,205,3,0.25,0.15
-24,Differential Equations,MATH,220,5,0.1,0.9
-25,Database Systems,CS,150,4,0.1,0.8
-26,Game Theory,ECON,210,4,0.8,0.9
-27,Ancient Civilizations,HIST,60,3,0.65,0.4
-28,Digital Photography,ART,115,3,0.3,0.2
-29,Technical Writing,ENG,160,4,0.9,0.7
+0,Calculus I,MATH,101,5,-0.4,0.4
+1,Introduction to Programming,CS,102,4,-0.4,0.35
+2,Microeconomics,ECON,103,4,0.2,0.25
+3,World History Survey,HIST,104,3,0.25,0.0
+4,Drawing Fundamentals,ART,55,3,-0.2,-0.4
+5,Creative Writing I,ENG,105,4,0.4,-0.3
+6,Introduction to Philosophy,PHIL,106,4,0.3,0.2
+7,Ballet Technique I,DANCE,52,3,-0.35,-0.45
+8,Linear Algebra,MATH,190,5,-0.45,0.45
+9,Data Structures,CS,195,4,-0.4,0.4
+10,Macroeconomics,ECON,192,4,0.2,0.3
+11,Modern European History,HIST,185,3,0.3,0.1
+12,Sculpture I,ART,80,3,-0.3,-0.35
+13,Victorian Literature,ENG,197,4,0.45,-0.3
+14,Ethics,PHIL,188,4,0.25,0.3
+15,Modern Dance II,DANCE,125,3,-0.3,-0.4
+16,Abstract Algebra,MATH,250,5,-0.45,0.48
+17,Algorithms,CS,270,4,-0.35,0.45
+18,Econometrics,ECON,280,4,0.35,0.35
+19,US Foreign Policy,HIST,215,3,0.3,0.2
+20,Oil Painting III,ART,230,3,-0.15,-0.4
+21,Shakespeare,ENG,245,4,0.4,-0.25
+22,Metaphysics,PHIL,260,4,0.3,0.4
+23,Choreography Workshop,DANCE,205,3,-0.25,-0.35
+24,Differential Equations,MATH,220,5,-0.4,0.4
+25,Database Systems,CS,150,4,-0.4,0.3
+26,Game Theory,ECON,210,4,0.3,0.4
+27,Ancient Civilizations,HIST,60,3,0.15,-0.1
+28,Digital Photography,ART,115,3,-0.2,-0.3
+29,Technical Writing,ENG,160,4,0.4,0.2
