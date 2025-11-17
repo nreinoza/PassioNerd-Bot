@@ -2,6 +2,7 @@ import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.stats import multivariate_normal
 
 UNIT_MIN = 12
 UNIT_MAX = 20
@@ -9,7 +10,9 @@ PREREQ_MIN = 3
 MAJOR_MIN = 40
 GRAD_REWARD = 1000
 ENJOYMENT_SCALE = 10
-COSINE_ENJOYMENT = True
+ENJOYMENT_STD_DEV = 1.0
+K = 10  # Number of closest courses to consider
+STARTING_VARIANCE = 1e6 # Very high uncertainty at start
 
 class Game():
     def __init__(self, csv: str, true_pref: np.array):
@@ -24,13 +27,18 @@ class Game():
         assert(true_pref.shape[0] == len(embedding_cols))
         self.true_pref = true_pref
         
-        # Current state: units, quarter #, TODO belief distribution, classes taken
+        # Current state: units, quarter #, belief distribution, classes taken
         self.active_units = 0
         self.total_units = 0
         self.active_courses = set()
         self.active_quarter = 1
         self.courses_taken = set()
         self.total_reward = 0.0
+
+        D = true_pref.shape[0]
+        mean = np.zeros(D)
+        covariance = STARTING_VARIANCE * np.eye(D)
+        self.belief_distribution = multivariate_normal(mean=mean, cov=covariance)
 
     def prereqs_covered(self, course_id) -> bool:
         """
@@ -71,40 +79,22 @@ class Game():
         return True
   
     def enjoyment(self, course_ids) -> dict[str, float]:
-        enjoyments = {}
-        if not COSINE_ENJOYMENT:
-            for course_id in course_ids:
-                res = input(f"Please give the class {self.courses.loc[course_id, 'name']} an enjoyment score between 0.0 and 10.0")
-                res = int(res)
-                if (res < 0 or res > 10):
-                    ValueError("Hey why did you do that? :(")
-                enjoyments[course_id] = res
-            return enjoyments
-                
-
-        std_dev = 0.1
-        # for each course_id
-        norm_true_pref = np.linalg.norm(self.true_pref)
+        enjoyments = {}                
 
         # for each course_id
         for course_id in course_ids:
             # Get the course embedding
             course_embedding = self.courses.loc[course_id, 'embedding']
-            norm_course_emb = np.linalg.norm(course_embedding)
 
-            # 1. compute cosine similarity between self.true_pref and this courses' embedding
-            if norm_course_emb == 0:
-                ValueError(f"Course id {course_id} has embedding norm 0 (?)")
-            else:
-                dot_product = np.dot(self.true_pref, course_embedding)
-                cosine_similarity = dot_product / (norm_true_pref * norm_course_emb)
+            # 1. compute euclidean distance between self.true_pref and this courses' embedding
+            distance = np.linalg.norm(self.true_pref - course_embedding)
 
-            # 2. create gaussian with this mean and the std_dev above
+            # 2. create gaussian with this mean and the std_dev hyperparameter
             # 3. Take 1 sample from this gaussian. This is the enjoyment.
-            enjoyment_sample = np.random.normal(loc=cosine_similarity, scale=std_dev)
+            distance_sample = np.random.normal(loc=distance, scale=ENJOYMENT_STD_DEV)
             
             # 4. Add course_id : enjoyment pair to the enjoyments dict
-            enjoyments[course_id] = (enjoyment_sample + 1) * (ENJOYMENT_SCALE / 2)
+            enjoyments[course_id] = math.sqrt(distance_sample)
             
         return enjoyments
 
@@ -120,9 +110,9 @@ class Game():
         
         return total
 
-    def closest_takeable_class(self, target_embedding: np.array) -> str | None:
+    def closest_course(self, target_embedding: np.array) -> str | None:
         """
-        Finds the course ID of the closest available and takeable class based on
+        Finds the course IDs of the k closest available and takeable class based on
         the target embedding and game state constraints.
 
         Constraints:
@@ -166,21 +156,23 @@ class Game():
         distances = np.linalg.norm(embedding_matrix - target_embedding, axis=1)
         
         # 5. Find the index of the minimum distance
+
+        # 3. Select the first k indices
         closest_index_in_mask = np.argmin(distances)
-        
+
         # 6. Get the corresponding course ID from the takeable_courses DataFrame index
-        closest_course_id = takeable_courses.iloc[closest_index_in_mask].name # .name returns the index value (the course_id)
+        closest_course_ids = takeable_courses.iloc[closest_index_in_mask].name # .name returns the index value (the course_id)
         
-        return closest_course_id
+        return closest_course_ids
     
     class Action:
-        def __init__(self, embedding=None):
-            if embedding:
+        def __init__(self, course_id=None):
+            if course_id is None:
                 self.is_commit = False
             else:
                 self.is_commit = True
-            self.embedding = embedding
-            assert((self.is_commit and self.embedding) or (not self.is_commit and not self.embedding))
+            self.course_id = course_id
+            assert((self.is_commit and self.course_id) or (not self.is_commit and not self.course_id))
     
     class StepResult:
         def __init__(self, enjoyments=None, graduation=None, nothing_new=None):
@@ -212,22 +204,29 @@ class Game():
             return self.StepResult(enjoyments=enj)
         
         else:
-            id = self.closest_takeable_class(action.embedding)
-            
-            if id == None:
-                # No available classes (either bc units or prereqs or all were taken)
-                if self.active_units < UNIT_MIN:
-                    # WEIRD SHIT GOING ON
-                    ValueError(f"Somehow no classes can be taken but we have less than 12 units... about to crash")
-                return self.step(self.Action()) # commit
-
-            # Update state
+            # Update state with selected class
             self.active_courses.add(id)
             self.active_units += self.courses.loc[id, 'units']
             return self.StepResult(nothing_new=True)
 
     def take_action(self, observations: dict[str: float]):
+        # Sample from the belief distribution
+        sampled_points = self.belief_distribution.rvs(size=K)
+
+        possible_actions = []
+        for point in sampled_points:
+            possible_actions.append(self.Action(course_id=self.closest_course(point)))
+        possible_actions.append(self.Action()) # Commit action
+
+        for action in possible_actions:
+            # Evaluate choice using some lookahead and value estimation
+            pass
+
         return self.Action() # WILL ALWAYS COMMIT FOR NOW
+
+    def belief_update(self, observations: dict[str: float]):
+        # Update the belief distribution based on the observations
+        pass
 
     def run(self):
         observations = {}
@@ -242,5 +241,5 @@ class Game():
                 continue
             else:
                 observations = res.enjoyments
-                # Update the belief system using these observations
+                self.belief_update(observations)
 
