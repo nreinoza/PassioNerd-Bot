@@ -294,6 +294,24 @@ class CoursePlan(Game):
             distance = np.linalg.norm(self.subject_embeddings[state.uncertain] - course_embedding)
             # Negative distance as reward
             total -= distance * units
+
+
+        # Bonus for completing a major (taking 12 courses in one subject, including 2 advanced)
+        if len(state.uncertain) == 12:
+            taken_course_ids = set()
+            for quarter in state.known_state:
+                taken_course_ids.update(quarter)
+            taken_course_by_subject = self._count_courses_by_subject(state.known_state)
+
+            num_advanced_by_subject = defaultdict(int)
+            for _, row in taken_course_by_subject.iterrows():
+                if row['level'] == 2:
+                    num_advanced_by_subject[row['subject']] += row['count']
+            
+            for subject, count in taken_course_ids.items():
+                if count >= 12 and num_advanced_by_subject[subject] >= 2: # 12 classes to complete a major, 2 advanced
+                    total += 300
+
         
         return total
     
