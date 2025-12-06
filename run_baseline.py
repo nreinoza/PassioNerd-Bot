@@ -1,22 +1,22 @@
 import numpy as np
+import pandas as pd
 from random_baseline import RandomBaseline
 from CoursePlan import CoursePlan
 from game import Game 
-from forward import A, BeliefState 
+from forward import A, State, BeliefState 
 
-def display_quarter(game: Game, quarter: A): 
+def display_quarter(game: Game, quarter): 
     """
     Prints out a quarter's contents: each course's name and unit count. Code copied from run.py for forward search, for formatting consistency.
     """
-    print(f"\nQuarter {i}:")
-        for course_id in quarter:
-            course_info = game.courses.loc[course_id]
-            subjects = course_info['subject_codes']
-            units = course_info['units']
-            print(f"  - Course {course_id}: {subjects} ({units} units)")
+    for course_id in quarter:
+        course_info = game.courses.loc[course_id]
+        subjects = course_info['subject_codes']
+        units = course_info['units']
+        print(f"  - Course {course_id}: {subjects} ({units} units)")
 
 
-def run_baseline_loop(game: Courseplan, uniform_belief: np.ndarray, true_state_idx: int) -> tuple():
+def run_baseline_loop(game: CoursePlan, uniform_belief: np.ndarray, true_state_idx: int) -> tuple:
     """
     Run random baseline policy in a loop until 12 quarters have been planned. Code copied from run.py for forward search, for formatting consistency.
     """
@@ -26,7 +26,7 @@ def run_baseline_loop(game: Courseplan, uniform_belief: np.ndarray, true_state_i
     known_state = ()
     belief_state = BeliefState(belief=uniform_belief, known_state=known_state)
     true_state = State(uncertain=true_state_idx, known=known_state)
-    quarters = []
+    planned_quarters = []
     total_reward = 0.0
 
     print("=" * 80)
@@ -43,6 +43,7 @@ def run_baseline_loop(game: Courseplan, uniform_belief: np.ndarray, true_state_i
         print(f"QUARTER {quarter_num}")
         print(f"{'=' * 80}")
 
+        # Get available actions
         valid_actions = game.actions(belief_state)
         print(f"\nNumber of valid quarter options: {len(valid_actions)}")
         if not valid_actions:
@@ -50,6 +51,9 @@ def run_baseline_loop(game: Courseplan, uniform_belief: np.ndarray, true_state_i
             break
 
         action = random.run(belief_state)
+        if action is None:
+            print("No action found. Stopping.")
+            break
 
         # Display selected quarter
         print(f"\nSelected quarter:")
@@ -67,11 +71,13 @@ def run_baseline_loop(game: Courseplan, uniform_belief: np.ndarray, true_state_i
         print(f"Reward: {reward:.4f}")
         print(f"Cumulative reward: {total_reward:.4f}")
 
+        # belief_state = belief_state.update(true_state.known)
+
         # Display cumulative units
         total_units = sum(
             game.courses.loc[course_id]['units']
             for quarter in planned_quarters
-            for cid in quarter
+            for course_id in quarter
         )
         print(f"\nCumulative units: {total_units}")
     
@@ -94,11 +100,11 @@ def run_baseline_loop(game: Courseplan, uniform_belief: np.ndarray, true_state_i
     total_units = sum(
         game.courses.loc[course_id]['units']
         for quarter in planned_quarters
-        for cid in quarter
+        for course_id in quarter
     )
     print(f"\nTotal units completed: {total_units}")
 
-return planned_quarters, total_reward
+    return planned_quarters, total_reward
 
 
 def main():
@@ -140,3 +146,11 @@ def main():
         uniform_belief=uniform_belief,
         true_state_idx=true_state_idx
     )
+
+    print(f"\n\nSimulation complete!")
+    print(f"Planned {len(planned_quarters)} quarters")
+    print(f"Total reward: {total_reward:.4f}")
+
+
+if __name__ == "__main__":
+    main()
