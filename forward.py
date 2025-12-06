@@ -147,6 +147,39 @@ class Game(ABC):
         """
         pass
 
+    def step(self, state: State, action: A) -> Tuple[State, int, float]:
+        """
+        Execute action in the environment: transition, sample observation, get reward.
+        
+        This is a convenience method that combines the core dynamics into a single step,
+        useful for simulation and rollouts.
+        
+        Args:
+            state: Current complete state (uncertain + known)
+            action: Action to take
+            
+        Returns:
+            Tuple of (new_state, observation, reward) where:
+            - new_state: New complete state (uncertain state unchanged, known state updated)
+            - observation: Sampled observation index
+            - reward: Reward received for taking action from state
+        """
+        # Get reward for current state-action pair
+        reward = self.reward(state, action)
+        
+        # Transition the known state
+        new_known_state = self.transition(state.known, action)
+        
+        # Sample observation from P(o | uncertain_state, action)
+        obs_probs_matrix = self.observation_probs(action)
+        obs_probs_given_state = obs_probs_matrix[:, state.uncertain]
+        observation = np.random.choice(len(obs_probs_given_state), p=obs_probs_given_state)
+        
+        # Create new state (uncertain state remains the same)
+        new_state = State(uncertain=state.uncertain, known=new_known_state)
+        
+        return new_state, observation, reward
+
 
 class ForwardSearch:
     """

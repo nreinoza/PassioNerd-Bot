@@ -37,6 +37,9 @@ class CoursePlan(Game):
             lambda x: np.array(eval(x)) if isinstance(x, str) else np.array(x)
         )
         
+        # Set id as index for O(1) lookup performance
+        self.courses.set_index('id', inplace=True)
+        
         # Create indexed dataframe for prerequisite logic
         self.course_codes = self._create_course_codes(courses)
         
@@ -102,8 +105,8 @@ class CoursePlan(Game):
         subject_counts = np.zeros(len(self.subjects))
         
         # Accumulate embeddings for each subject
-        for _, row in self.courses.iterrows():
-            course_id = int(row['id'])
+        for course_idx, row in self.courses.iterrows():
+            course_id = int(course_idx)  # course_idx is now the course id since we set it as index
             embedding = row['embedding']
             
             # Get all subjects for this course from course_codes
@@ -167,7 +170,7 @@ class CoursePlan(Game):
         # Extract known state from belief state
         known_state = belief_state.known_state
 
-        if len(known_state) == 12:
+        if len(known_state) == 3:
             # Max quarters reached
             return []
         
@@ -233,9 +236,9 @@ class CoursePlan(Game):
         adjusted_belief = adjusted_belief / adjusted_belief.sum()
         
         # Naive sampling: generate random quarters of 4 courses
-        # Sample up to 100 random quarters (or fewer if not enough eligible courses)
+        # Sample up to 2 random quarters (or fewer if not enough eligible courses)
         quarters = []
-        n_samples = min(100, sum(len(v) for v in eligible_by_subject.values()) // 4)
+        n_samples = min(2, sum(len(v) for v in eligible_by_subject.values()) // 4)
         
         for _ in range(n_samples):
             quarter_courses = []
@@ -246,12 +249,13 @@ class CoursePlan(Game):
                 subject = self.subjects[subject_idx]
                 
                 # Get eligible non-used courses for subject
-                available = eligible_by_subject[subject]
+                available = eligible_by_subject[subject] - set(quarter_courses)
                 if not available:
                     break  # cannot complete this quarter, skip it
                 
                 # Uniformly choose an eligible course within the subject
-                course = np.random.choice(available)
+                # Convert set to list for np.random.choice
+                course = np.random.choice(list(available))
                 quarter_courses.append(course)
             
             # Only accept full quarters
@@ -282,13 +286,14 @@ class CoursePlan(Game):
 
         # for each course_id
         for course_id in course_ids:
-            # Get the course embedding
+            # Get the course data using index-based lookup (O(1))
             course_embedding = self.courses.loc[course_id, 'embedding']
+            units = self.courses.loc[course_id, 'units']
 
             # 1. compute euclidean distance between self.true_pref and this courses' embedding
             distance = np.linalg.norm(self.subject_embeddings[state.uncertain] - course_embedding)
             # Negative distance as reward
-            total -= distance * self.courses.loc[course_id, 'units']
+            total -= distance * units
         
         return total
     
@@ -311,8 +316,7 @@ class CoursePlan(Game):
         # Get embeddings for all courses in the quarter
         course_embeddings = []
         for course_id in action:
-            course_row = self.courses[self.courses['id'] == course_id].iloc[0]
-            course_embeddings.append(course_row['embedding'])
+            course_embeddings.append(self.courses.loc[course_id, 'embedding'])
         
         # Initialize probability matrix: P(obs=i | state=j, action)
         # Shape: (n_observations, n_uncertain_states)
