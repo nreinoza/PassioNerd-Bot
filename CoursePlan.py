@@ -166,6 +166,10 @@ class CoursePlan(Game):
         """
         # Extract known state from belief state
         known_state = belief_state.known_state
+
+        if len(known_state) == 12:
+            # Max quarters reached
+            return []
         
         # Get courses already taken
         taken_course_ids = set()
@@ -182,49 +186,77 @@ class CoursePlan(Game):
             prereq_counts[key] = row['count']
         
         # Find eligible courses
-        eligible_course_ids = set()
+        eligible_by_subject = {subject: set() for subject in self.subjects}
         
-        # All intro courses (level 0) are eligible (if not taken)
-        intro_courses = self.course_codes[self.course_codes['level'] == 0]['id'].unique()
-        eligible_course_ids.update(intro_courses)
+        # Intro (level 0) always eligible
+        for _, row in self.course_codes[self.course_codes['level'] == 0].iterrows():
+            if row['id'] not in taken_course_ids:
+                eligible_by_subject[row['subject']].add(row['id'])
         
-        # Check intermediate and advanced courses for each subject
+        # Intermediate + Advanced based on prerequisites
         for subject in self.subjects:
             intro_count = prereq_counts.get((subject, 0), 0)
             intermediate_count = prereq_counts.get((subject, 1), 0)
             
-            # Intermediate courses (level 1): need 3+ intro in same subject
+            # Intermediate requires 3+ intro
             if intro_count >= 3:
-                intermediate_courses = self.course_codes[
+                df_inter = self.course_codes[
                     (self.course_codes['subject'] == subject) & 
                     (self.course_codes['level'] == 1)
-                ]['id'].unique()
-                eligible_course_ids.update(intermediate_courses)
+                ]
+                for _, row in df_inter.iterrows():
+                    if row['id'] not in taken_course_ids:
+                        eligible_by_subject[subject].add(row['id'])
                 
-                # Advanced courses (level 2): need 2+ intermediate in same subject
+                # Advanced requires 2+ intermediate
                 if intermediate_count >= 2:
-                    advanced_courses = self.course_codes[
+                    df_adv = self.course_codes[
                         (self.course_codes['subject'] == subject) & 
                         (self.course_codes['level'] == 2)
-                    ]['id'].unique()
-                    eligible_course_ids.update(advanced_courses)
+                    ]
+                    for _, row in df_adv.iterrows():
+                        if row['id'] not in taken_course_ids:
+                            eligible_by_subject[subject].add(row['id'])
+
+        # Belief distribution over subjects
+        belief = np.array(belief_state.belief)
+
+        # Create sampling pool: subjects with at least 1 eligible course
+        valid_subjects = [s for s in self.subjects if len(eligible_by_subject[s]) > 0]
+        if len(valid_subjects) == 0:
+            return []
         
-        # Remove already taken courses
-        eligible_course_ids -= taken_course_ids
-        
-        # Convert to sorted list for consistent ordering
-        eligible_courses = sorted(list(eligible_course_ids))
+        # Adjust belief to zero out subjects with no eligible courses
+        adjusted_belief = np.array([
+            belief[i] if self.subjects[i] in valid_subjects else 0.0 for i in range(len(self.subjects))
+        ])  
+        adjusted_belief = adjusted_belief / adjusted_belief.sum()
         
         # Naive sampling: generate random quarters of 4 courses
         # Sample up to 100 random quarters (or fewer if not enough eligible courses)
         quarters = []
-        n_samples = min(100, len(eligible_courses) // 4)
+        n_samples = min(100, sum(len(v) for v in eligible_by_subject.values()) // 4)
         
-        if len(eligible_courses) >= 4:
-            for _ in range(n_samples):
-                # Randomly sample 4 courses without replacement
-                sampled = tuple(sorted(np.random.choice(eligible_courses, size=4, replace=False)))
-                quarters.append(sampled)
+        for _ in range(n_samples):
+            quarter_courses = []
+            
+            for _ in range(4):
+                # Sample a subject
+                subject_idx = np.random.choice(len(self.subjects), p=adjusted_belief)
+                subject = self.subjects[subject_idx]
+                
+                # Get eligible non-used courses for subject
+                available = eligible_by_subject[subject]
+                if not available:
+                    break  # cannot complete this quarter, skip it
+                
+                # Uniformly choose an eligible course within the subject
+                course = np.random.choice(available)
+                quarter_courses.append(course)
+            
+            # Only accept full quarters
+            if len(quarter_courses) == 4:
+                quarters.append(tuple(sorted(quarter_courses)))
         
         return quarters
     
@@ -244,8 +276,21 @@ class CoursePlan(Game):
         Returns:
             Reward value
         """
-        # Placeholder implementation
-        return 0.0
+        total = 0.0
+        course_ids = action
+               
+
+        # for each course_id
+        for course_id in course_ids:
+            # Get the course embedding
+            course_embedding = self.courses.loc[course_id, 'embedding']
+
+            # 1. compute euclidean distance between self.true_pref and this courses' embedding
+            distance = np.linalg.norm(self.subject_embeddings[state.uncertain] - course_embedding)
+            # Negative distance as reward
+            total -= distance * self.courses.loc[course_id, 'units']
+        
+        return total
     
     def observation_probs(self, action: Tuple[int, ...]) -> np.ndarray:
         """
