@@ -2,7 +2,7 @@ import numpy as np
 from typing import List, Tuple, TypeVar, Dict, Any, Optional
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-
+from tqdm import tqdm
 
 A = TypeVar('A')  # Action type
 KnownState = TypeVar('KnownState')  # Known state type (generic)
@@ -304,7 +304,7 @@ class ForwardSearch:
                 max_q_value = q_value
         
         return max_q_value
-    
+
     def search(self, belief_state: BeliefState, depth: int) -> Tuple[A, float]:
         """
         Perform forward search and return the best action.
@@ -323,7 +323,7 @@ class ForwardSearch:
         best_action = None
         best_q_value = float('-inf')
         
-        for action in valid_actions:
+        for action in tqdm(valid_actions, desc=f"Search depth {depth}", leave=False):
             q_value = self.Q_value(belief_state, action, depth)
             if q_value > best_q_value:
                 best_q_value = q_value

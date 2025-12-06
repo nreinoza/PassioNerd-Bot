@@ -170,7 +170,7 @@ class CoursePlan(Game):
         # Extract known state from belief state
         known_state = belief_state.known_state
 
-        if len(known_state) == 3:
+        if len(known_state) == 6:
             # Max quarters reached
             return []
         
@@ -236,9 +236,9 @@ class CoursePlan(Game):
         adjusted_belief = adjusted_belief / adjusted_belief.sum()
         
         # Naive sampling: generate random quarters of 4 courses
-        # Sample up to 2 random quarters (or fewer if not enough eligible courses)
+        # Sample up to 4 random quarters (or fewer if not enough eligible courses)
         quarters = []
-        n_samples = min(2, sum(len(v) for v in eligible_by_subject.values()) // 4)
+        n_samples = min(4, sum(len(v) for v in eligible_by_subject.values()) // 4)
         
         for _ in range(n_samples):
             quarter_courses = []

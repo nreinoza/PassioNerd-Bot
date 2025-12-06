@@ -114,7 +114,7 @@ def run_forward_search_loop(
         total_units = sum(
             game.courses.loc[course_id]['units']
             for quarter in planned_quarters
-            for cid in quarter
+            for course_id in quarter
         )
         print(f"\nCumulative units: {total_units}")
     
@@ -137,7 +137,7 @@ def run_forward_search_loop(
     total_units = sum(
         game.courses.loc[course_id]['units']
         for quarter in planned_quarters
-        for cid in quarter
+        for course_id in quarter
     )
     print(f"\nTotal units completed: {total_units}")
     
