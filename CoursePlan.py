@@ -240,7 +240,7 @@ class CoursePlan(Game):
         # Naive sampling: generate random quarters of 4 courses
         # Sample up to 4 random quarters (or fewer if not enough eligible courses)
         quarters = []
-        n_samples = min(4, sum(len(v) for v in eligible_by_subject.values()) // 4)
+        n_samples = min(self.num_actions(len(belief_state.known_state)), sum(len(v) for v in eligible_by_subject.values()) // 4)
         
         for _ in range(n_samples):
             quarter_courses = []
@@ -266,11 +266,20 @@ class CoursePlan(Game):
         
         return quarters
     
+    def num_actions(self, quarters_taken) -> int:
+        """
+        Calculate number of actions to sample (quarters). We want more options at the start, less towards the end.
+        
+        Returns:
+            Number of possible quarters (combinations of 4 courses)
+        """
+        first_quarter_options = 10
+        return max(first_quarter_options - quarters_taken, 3)
+    
     def reward(self, state: State, action: Tuple[int, ...]) -> float:
         """
         Get reward for taking a quarter of courses (action) from a state.
         
-        TODO: Define reward function based on:
         - Alignment between student's uncertain interest (state.uncertain) and course subject
         - Course quality/value
         - Progress towards degree requirements

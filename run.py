@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from forward import BeliefState, ForwardSearch, State
 from CoursePlan import CoursePlan
+import time
 
 
 def run_forward_search_loop(
@@ -72,6 +73,8 @@ def run_forward_search_loop(
             break
         
         # Perform forward search
+        if quarter_num == 4 or quarter_num == 7:
+            search_depth += 1  # Increase depth every 4 quarters
         print(f"\nPerforming forward search (depth={search_depth})...")
         best_action, best_value = search.search(belief_state, depth=search_depth)
         
@@ -188,6 +191,7 @@ def main():
     # initial_belief = initial_belief / initial_belief.sum()  # Renormalize
     
     # Run forward search
+    start = time.perf_counter()
     planned_quarters, total_reward = run_forward_search_loop(
         game=game,
         initial_belief=initial_belief,
@@ -195,10 +199,12 @@ def main():
         search_depth=2,
         discount=1.0
     )
+    end = time.perf_counter()
     
     print(f"\n\nSimulation complete!")
     print(f"Planned {len(planned_quarters)} quarters")
     print(f"Total reward: {total_reward:.4f}")
+    print(f"Total time: {end - start:.2f} seconds")
 
 
 if __name__ == "__main__":
