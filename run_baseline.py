@@ -58,11 +58,6 @@ def run_baseline_loop(game: CoursePlan, uniform_belief: np.ndarray, true_state_i
         # Display selected quarter
         print(f"\nSelected quarter:")
         display_quarter(game, action)
-        # for course_id in action:
-        #     course_info = game.courses.loc[course_id]
-        #     subjects = course_info['subject_codes']
-        #     units = course_info['units']
-        #     print(f"  - Course {course_id}: {subjects} ({units} units)")
         planned_quarters.append(action)
 
         # Execute action in environment using step() 
@@ -70,8 +65,6 @@ def run_baseline_loop(game: CoursePlan, uniform_belief: np.ndarray, true_state_i
         total_reward += reward
         print(f"Reward: {reward:.4f}")
         print(f"Cumulative reward: {total_reward:.4f}")
-
-        # belief_state = belief_state.update(true_state.known)
 
         # Display cumulative units
         total_units = sum(
@@ -91,11 +84,6 @@ def run_baseline_loop(game: CoursePlan, uniform_belief: np.ndarray, true_state_i
     for i, quarter in enumerate(planned_quarters, 1):
         print(f"\nQuarter {i}:")
         display_quarter(game, quarter)
-        # for course_id in quarter:
-        #     course_info = game.courses.loc[course_id]
-        #     subjects = course_info['subject_codes']
-        #     units = course_info['units']
-        #     print(f"  - Course {course_id}: {subjects} ({units} units)")
     
     total_units = sum(
         game.courses.loc[course_id]['units']
