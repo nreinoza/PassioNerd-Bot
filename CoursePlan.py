@@ -5,7 +5,7 @@ import re
 from collections import defaultdict
 
 # Import from the POMDP framework
-from pomdp_framework import Game, State, BeliefState
+from forward import Game, State, BeliefState
 
 
 # Type alias for KnownState: tuple of quarters, where each quarter is a tuple of course IDs
