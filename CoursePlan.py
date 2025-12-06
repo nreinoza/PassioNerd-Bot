@@ -253,8 +253,6 @@ class CoursePlan(Game):
         
         After taking a quarter, we observe which subjects the courses belong to.
         
-        TODO: Define how observations relate to uncertain states and courses taken.
-        
         Args:
             action: Quarter (tuple of course IDs) being taken
         
@@ -262,9 +260,59 @@ class CoursePlan(Game):
             Matrix of shape (n_observations, n_uncertain_states) where entry [i, j] is
             P(observation=i | uncertain_state=j, action)
         """
-        # Placeholder: uniform distribution
-        n_states = len(self.subjects)
-        return np.ones((n_states, n_states)) / n_states
+        n_subjects = len(self.subjects)
+        sigma = 1.0  # Observation noise parameter (can be tuned)
+        
+        # Get embeddings for all courses in the quarter
+        course_embeddings = []
+        for course_id in action:
+            course_row = self.courses[self.courses['id'] == course_id].iloc[0]
+            course_embeddings.append(course_row['embedding'])
+        
+        # Initialize probability matrix: P(obs=i | state=j, action)
+        # Shape: (n_observations, n_uncertain_states)
+        obs_probs = np.zeros((n_subjects, n_subjects))
+        
+        # For each true state (student's true interest)
+        for state_idx, true_subject in enumerate(self.subjects):
+            true_embedding = self.subject_embeddings[state_idx]
+            
+            # Compute distances from true interest to each course
+            true_distances = []
+            for course_emb in course_embeddings:
+                dist = np.linalg.norm(true_embedding - course_emb)
+                true_distances.append(dist)
+            
+            # For each possible observation
+            for obs_idx, obs_subject in enumerate(self.subjects):
+                obs_embedding = self.subject_embeddings[obs_idx]
+                
+                # Compute distances from observed subject to each course
+                obs_distances = []
+                for course_emb in course_embeddings:
+                    dist = np.linalg.norm(obs_embedding - course_emb)
+                    obs_distances.append(dist)
+                
+                # Compute log probability (for numerical stability)
+                # P(o | s, a) ∝ exp(-1/(2σ²) * Σ(d(v_o, e_i) - d(v_s, e_i))²)
+                sum_squared_diff = 0.0
+                for i in range(len(course_embeddings)):
+                    diff = obs_distances[i] - true_distances[i]
+                    sum_squared_diff += diff ** 2
+                
+                log_prob = -sum_squared_diff / (2 * sigma ** 2)
+                obs_probs[obs_idx, state_idx] = log_prob
+        
+        # Convert from log probabilities to probabilities and normalize
+        # For numerical stability, subtract max before exponentiating
+        for state_idx in range(n_subjects):
+            log_probs = obs_probs[:, state_idx]
+            max_log_prob = np.max(log_probs)
+            probs = np.exp(log_probs - max_log_prob)
+            # Normalize to sum to 1
+            obs_probs[:, state_idx] = probs / np.sum(probs)
+        
+        return obs_probs
     
     def transition(self, known_state: KnownState, action: Tuple[int, ...]) -> KnownState:
         """
