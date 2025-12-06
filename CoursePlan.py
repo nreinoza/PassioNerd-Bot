@@ -22,7 +22,7 @@ class CoursePlan(Game):
     Observations: After taking a course, observe which subject area it belongs to
     """
 
-    MAX_QUARTERS = 6
+    MAX_QUARTERS = 12
     
     def __init__(self, courses: pd.DataFrame):
         """
@@ -340,7 +340,7 @@ class CoursePlan(Game):
             P(observation=i | uncertain_state=j, action)
         """
         n_subjects = len(self.subjects)
-        sigma = 1.0  # Observation noise parameter (can be tuned)
+        sigma = 1.5  # Observation noise parameter (can be tuned)
         
         # Get embeddings for all courses in the quarter
         course_embeddings = []
