@@ -297,11 +297,11 @@ class CoursePlan(Game):
 
 
         # Bonus for completing a major (taking 12 courses in one subject, including 2 advanced)
-        if len(state.uncertain) == 12:
+        if len(state.known) == 12:
             taken_course_ids = set()
-            for quarter in state.known_state:
+            for quarter in state.known:
                 taken_course_ids.update(quarter)
-            taken_course_by_subject = self._count_courses_by_subject(state.known_state)
+            taken_course_by_subject = self._count_courses_by_subject(state.known)
 
             num_advanced_by_subject = defaultdict(int)
             for _, row in taken_course_by_subject.iterrows():
