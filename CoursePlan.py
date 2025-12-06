@@ -21,6 +21,8 @@ class CoursePlan(Game):
     Actions: Enrolling in specific courses
     Observations: After taking a course, observe which subject area it belongs to
     """
+
+    MAX_QUARTERS = 6
     
     def __init__(self, courses: pd.DataFrame):
         """
@@ -170,7 +172,7 @@ class CoursePlan(Game):
         # Extract known state from belief state
         known_state = belief_state.known_state
 
-        if len(known_state) == 6:
+        if len(known_state) == self.MAX_QUARTERS:
             # Max quarters reached
             return []
         
@@ -297,7 +299,7 @@ class CoursePlan(Game):
 
 
         # Bonus for completing a major (taking 12 courses in one subject, including 2 advanced)
-        if len(state.known) == 12:
+        if len(state.known) == self.MAX_QUARTERS:
             taken_course_ids = set()
             for quarter in state.known:
                 taken_course_ids.update(quarter)
