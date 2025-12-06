@@ -263,19 +263,20 @@ class ForwardSearch:
         prob_obs_given_belief = obs_prob_matrix @ belief_state.belief  # Shape: (n_observations,)
         
         expected_future_value = 0.0
-        for observation in range(n_observations):
-            if prob_obs_given_belief[observation] > 0:  # Only consider observations with non-zero probability
-                # Get likelihood for Bayesian update: P(o | s, a) for all states s
-                # This is the observation-th row of the observation probability matrix
-                likelihood_obs_given_state = obs_prob_matrix[observation, :]
+        filtered_prob_obs = prob_obs_given_belief[prob_obs_given_belief > 0.04]
+        filtered_prob_obs = filtered_prob_obs / filtered_prob_obs.sum()
+        for observation in range(len(filtered_prob_obs)):
+            # Get likelihood for Bayesian update: P(o | s, a) for all states s
+            # This is the observation-th row of the observation probability matrix
+            likelihood_obs_given_state = obs_prob_matrix[observation, :]
                 
-                # Create updated belief state
-                updated_belief = belief_state.update(observation, likelihood_obs_given_state, new_known_state)
+            # Create updated belief state
+            updated_belief = belief_state.update(observation, likelihood_obs_given_state, new_known_state)
                 
-                # Recursively compute value of updated belief
-                future_value = self.U_value(updated_belief, depth - 1)
+            # Recursively compute value of updated belief
+            future_value = self.U_value(updated_belief, depth - 1)
                 
-                expected_future_value += prob_obs_given_belief[observation] * future_value
+            expected_future_value += prob_obs_given_belief[observation] * future_value
         
         return immediate_reward + self.discount * expected_future_value
     

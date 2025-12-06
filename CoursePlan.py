@@ -273,8 +273,21 @@ class CoursePlan(Game):
         Returns:
             Number of possible quarters (combinations of 4 courses)
         """
-        first_quarter_options = 10
-        return max(first_quarter_options - quarters_taken, 3)
+        actions_per_q = {
+            0 :10,
+            1: 8, 
+            2: 6, 
+            3: 5, 
+            4: 4, 
+            5: 4, 
+            6: 4, 
+            7: 3, 
+            8: 3, 
+            9: 3, 
+            10: 4, 
+            11: 5
+        }
+        return actions_per_q[quarters_taken]
     
     def reward(self, state: State, action: Tuple[int, ...]) -> float:
         """

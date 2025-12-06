@@ -73,8 +73,8 @@ def run_forward_search_loop(
             break
         
         # Perform forward search
-        if quarter_num == 4 or quarter_num == 7:
-            search_depth += 1  # Increase depth every 4 quarters
+        if quarter_num == 5 or quarter_num == 8:
+            search_depth += 1
         print(f"\nPerforming forward search (depth={search_depth})...")
         best_action, best_value = search.search(belief_state, depth=search_depth)
         
