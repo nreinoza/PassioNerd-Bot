@@ -1,5 +1,5 @@
 import numpy as np
-import pandas as pd
+import polars as pl
 from forward import BeliefState, ForwardSearch, State
 from CoursePlan import CoursePlan
 import time
@@ -9,8 +9,6 @@ def run_forward_search_loop(
     game: CoursePlan,
     initial_belief: np.ndarray,
     true_state_idx: int,
-    search_depth: int = 2,
-    discount: float = 0.95
 ):
     """
     Run forward search loop to plan course schedule until no actions available.
@@ -19,14 +17,13 @@ def run_forward_search_loop(
         game: CoursePlan instance
         initial_belief: Initial probability distribution over subjects
         true_state_idx: True student interest (for simulation)
-        search_depth: Depth of forward search tree
-        discount: Discount factor for future rewards
     
     Returns:
         Tuple of (planned_quarters, total_reward)
     """
     # Initialize forward search
-    search = ForwardSearch(game, discount=discount)
+    discount = 1.0
+    search = ForwardSearch(game, discount=discount, value_fn=ForwardSearch.units_bonus_value_fn(game))
     
     # Initialize belief state with empty history
     known_state = ()  # Empty tuple of quarters
@@ -42,11 +39,12 @@ def run_forward_search_loop(
     print("=" * 80)
     print("COURSE PLANNING WITH FORWARD SEARCH")
     print("=" * 80)
-    print(f"Search depth: {search_depth}")
     print(f"Discount factor: {discount}")
     print(f"Number of subjects: {len(game.subjects)}")
     print(f"True student interest: {game.subjects[true_state_idx]}")
     print()
+
+    search_depth = 1
     
     # Main planning loop - run until no actions available
     quarter_num = 0
@@ -58,36 +56,41 @@ def run_forward_search_loop(
         
         # Display current belief
         print("\nCurrent belief over subjects:")
-        belief_df = pd.DataFrame({
+        belief_df = pl.DataFrame({
             'Subject': game.subjects,
             'Probability': belief_state.belief
-        }).sort_values('Probability', ascending=False)
-        print(belief_df.to_string(index=False))
-        
-        # Get available actions
-        valid_actions = game.actions(belief_state)
-        print(f"\nNumber of valid quarter options: {len(valid_actions)}")
-        
-        if not valid_actions:
-            print("\nNo valid actions available. Planning complete!")
-            break
+        }).sort('Probability', descending=True)
+        print(belief_df)
         
         # Perform forward search
-        if quarter_num == 5 or quarter_num == 8:
+        if quarter_num == 2:
             search_depth += 1
         print(f"\nPerforming forward search (depth={search_depth})...")
-        best_action, best_value = search.search(belief_state, depth=search_depth)
+        best_action, best_value, all_action_values = search.search(belief_state, depth=search_depth)
         
         if best_action is None:
             print("No action found. Stopping.")
             break
         
+        # Display top actions considered
+        print(f"\nTop 5 quarter options considered:")
+        for rank, (action, q_value) in enumerate(all_action_values[:5], 1):
+            course_list = []
+            total_units = 0
+            for course_id in action:
+                subjects = game.course_metadata[course_id]['subject_codes']
+                units = game.course_metadata[course_id]['units']
+                course_list.append(f"{course_id} ({subjects}, {units}u)")
+                total_units += units
+            courses_str = ", ".join(course_list)
+            marker = "★" if rank == 1 else " "
+            print(f"  {marker} {rank}. Q={q_value:.4f} | {total_units}u | {courses_str}")
+        
         # Display selected quarter
         print(f"\nSelected quarter (Q-value: {best_value:.4f}):")
         for course_id in best_action:
-            course_info = game.courses.loc[course_id]
-            subjects = course_info['subject_codes']
-            units = course_info['units']
+            subjects = game.course_metadata[course_id]['subject_codes']
+            units = game.course_metadata[course_id]['units']
             print(f"  - Course {course_id}: {subjects} ({units} units)")
         
         planned_quarters.append(best_action)
@@ -107,15 +110,15 @@ def run_forward_search_loop(
         belief_state = belief_state.update(observation, likelihood, true_state.known)
         
         print(f"\nUpdated belief (top 5 subjects):")
-        updated_belief_df = pd.DataFrame({
+        updated_belief_df = pl.DataFrame({
             'Subject': game.subjects,
             'Probability': belief_state.belief
-        }).sort_values('Probability', ascending=False).head(5)
-        print(updated_belief_df.to_string(index=False))
+        }).sort('Probability', descending=True).head(5)
+        print(updated_belief_df)
         
         # Display cumulative units
         total_units = sum(
-            game.courses.loc[course_id]['units']
+            game.course_metadata[course_id]['units']
             for quarter in planned_quarters
             for course_id in quarter
         )
@@ -132,13 +135,12 @@ def run_forward_search_loop(
     for i, quarter in enumerate(planned_quarters, 1):
         print(f"\nQuarter {i}:")
         for course_id in quarter:
-            course_info = game.courses.loc[course_id]
-            subjects = course_info['subject_codes']
-            units = course_info['units']
+            subjects = game.course_metadata[course_id]['subject_codes']
+            units = game.course_metadata[course_id]['units']
             print(f"  - Course {course_id}: {subjects} ({units} units)")
     
     total_units = sum(
-        game.courses.loc[course_id]['units']
+        game.course_metadata[course_id]['units']
         for quarter in planned_quarters
         for course_id in quarter
     )
@@ -153,13 +155,13 @@ def main():
     """
     # Load course data
     try:
-        courses_df = pd.read_csv('data/courses_processed.csv')
+        courses_df = pl.read_csv('data/courses_processed.csv')
         # drop embedding column
         if 'embedding' in courses_df.columns:
-            courses_df = courses_df.drop(columns=['embedding'])
+            courses_df = courses_df.drop('embedding')
         # rename umap_3d to embedding
         if 'umap_3d' in courses_df.columns:
-            courses_df = courses_df.rename(columns={'umap_3d': 'embedding'})
+            courses_df = courses_df.rename({'umap_3d': 'embedding'})
     except FileNotFoundError:
         print("Error: courses.csv not found.")
         print("Please provide a CSV file with columns: id, subject_codes, units, embedding")
@@ -178,8 +180,8 @@ def main():
     
     # Set true student interest (for simulation)
     # You can change this to test different scenarios
-    if 'CS' in game.subjects:
-        true_state_idx = game.subjects.index('CS')
+    if 'BIO' in game.subjects:
+        true_state_idx = game.subjects.index('BIO')
     else:
         true_state_idx = 0  # Default to first subject
     
@@ -196,8 +198,6 @@ def main():
         game=game,
         initial_belief=initial_belief,
         true_state_idx=true_state_idx,
-        search_depth=2,
-        discount=1.0
     )
     end = time.perf_counter()
     

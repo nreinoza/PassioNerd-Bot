@@ -1,5 +1,5 @@
 import numpy as np
-import pandas as pd
+import polars as pl
 from typing import List, Tuple, Dict, Set
 import re
 from collections import defaultdict
@@ -24,34 +24,59 @@ class CoursePlan(Game):
 
     MAX_QUARTERS = 12
     
-    def __init__(self, courses: pd.DataFrame):
+    def __init__(self, courses: pl.DataFrame):
         """
         Initialize the course planning game.
         
         Args:
             courses: DataFrame with columns [id, subject_codes, units, embedding]
         """
-        # Store original dataframe for metadata (units, embeddings)
-        self.courses = courses.copy()
+        # Convert embeddings to numpy matrix (all at once)
+        course_ids = courses['id'].to_list()
+        embeddings_list = []
+        units_list = []
+        subject_codes_list = []
         
-        # Ensure embeddings are numpy arrays
-        self.courses['embedding'] = self.courses['embedding'].apply(
-            lambda x: np.array(eval(x)) if isinstance(x, str) else np.array(x)
-        )
+        for row in courses.iter_rows(named=True):
+            embedding = row['embedding']
+            if isinstance(embedding, str):
+                embedding = np.array(eval(embedding))
+            else:
+                embedding = np.array(embedding)
+            embeddings_list.append(embedding)
+            units_list.append(row['units'])
+            subject_codes_list.append(row['subject_codes'])
         
-        # Set id as index for O(1) lookup performance
-        self.courses.set_index('id', inplace=True)
+        # Vectorized storage
+        self.course_ids = np.array(course_ids, dtype=np.int32)
+        self.course_embeddings_matrix = np.vstack(embeddings_list)  # Shape: (n_courses, embedding_dim)
+        self.course_units = np.array(units_list, dtype=np.float32)
+        
+        # Create mapping from course_id to index
+        self.course_id_to_idx = {cid: idx for idx, cid in enumerate(course_ids)}
+        
+        # Store metadata separately
+        self.course_metadata = {
+            int(cid): {'units': units, 'subject_codes': sc}
+            for cid, units, sc in zip(course_ids, units_list, subject_codes_list)
+        }
+        
+        # Store DataFrame WITHOUT embeddings (for serialization)
+        self.courses = courses.select(['id', 'subject_codes', 'units'])
         
         # Create indexed dataframe for prerequisite logic
         self.course_codes = self._create_course_codes(courses)
         
         # Extract all unique subjects (sorted for consistent indexing)
-        self.subjects = sorted(self.course_codes['subject'].unique().tolist())
+        self.subjects = sorted(self.course_codes.select('subject').unique().to_series().to_list())
         
-        # Compute mean embeddings for each subject
-        self.subject_embeddings = self._compute_subject_embeddings()
+        # Pre-compute subject to courses mapping
+        self._precompute_subject_mappings()
+        
+        # Compute mean embeddings for each subject (vectorized)
+        self.subject_embeddings = self._compute_subject_embeddings_vectorized()
     
-    def _create_course_codes(self, courses: pd.DataFrame) -> pd.DataFrame:
+    def _create_course_codes(self, courses: pl.DataFrame) -> pl.DataFrame:
         """
         Create indexed dataframe with one row per (course_id, subject) pair.
         
@@ -61,26 +86,20 @@ class CoursePlan(Game):
         """
         rows = []
         
-        for _, row in courses.iterrows():
+        for row in courses.iter_rows(named=True):
             course_id = int(row['id'])
             subject_codes_str = row['subject_codes']
             
-            # Parse each subject code (handles MS&E, AA, CS, etc.)
+            # Parse each subject code
             for code in subject_codes_str.split(','):
                 code = code.strip()
-                # Match: subject (any non-digit chars) + space + number
                 match = re.match(r'^([^\d]+)\s+(\d+)', code)
                 if match:
                     subject = match.group(1).strip()
                     number = int(match.group(2))
                     
-                    # Determine level: 0 (intro), 1 (intermediate), 2 (advanced)
-                    if number < 110:
-                        level = 0
-                    elif number < 200:
-                        level = 1
-                    else:
-                        level = 2
+                    # Vectorizable level computation
+                    level = 0 if number < 110 else (1 if number < 200 else 2)
                     
                     rows.append({
                         'id': course_id,
@@ -89,44 +108,50 @@ class CoursePlan(Game):
                         'level': level
                     })
         
-        return pd.DataFrame(rows)
+        return pl.DataFrame(rows)
     
-    def _compute_subject_embeddings(self) -> np.ndarray:
+    def _precompute_subject_mappings(self):
         """
-        Compute mean embedding for each subject.
+        Pre-compute mappings from subject/level to course indices for faster lookup.
+        """
+        # Map: subject -> set of course indices (in self.course_ids)
+        self.subject_to_course_indices = defaultdict(set)
+        
+        # Map: (subject, level) -> set of course indices
+        self.subject_level_to_course_indices = defaultdict(set)
+        
+        for row in self.course_codes.iter_rows(named=True):
+            course_id = row['id']
+            if course_id in self.course_id_to_idx:
+                idx = self.course_id_to_idx[course_id]
+                subject = row['subject']
+                level = row['level']
+                
+                self.subject_to_course_indices[subject].add(idx)
+                self.subject_level_to_course_indices[(subject, level)].add(idx)
+    
+    def _compute_subject_embeddings_vectorized(self) -> np.ndarray:
+        """
+        Compute mean embedding for each subject using vectorized operations.
         
         Returns:
-            Array of shape (n_subjects, embedding_dim) where row i is mean embedding for subjects[i]
+            Array of shape (n_subjects, embedding_dim)
         """
-        # Map subject to index
-        subject_to_idx = {subj: i for i, subj in enumerate(self.subjects)}
+        embedding_dim = self.course_embeddings_matrix.shape[1]
+        n_subjects = len(self.subjects)
         
-        # Get embedding dimension
-        embedding_dim = len(self.courses.iloc[0]['embedding'])
-        subject_embeddings = np.zeros((len(self.subjects), embedding_dim))
-        subject_counts = np.zeros(len(self.subjects))
+        subject_embeddings = np.zeros((n_subjects, embedding_dim))
         
-        # Accumulate embeddings for each subject
-        for course_idx, row in self.courses.iterrows():
-            course_id = int(course_idx)  # course_idx is now the course id since we set it as index
-            embedding = row['embedding']
-            
-            # Get all subjects for this course from course_codes
-            course_subjects = self.course_codes[self.course_codes['id'] == course_id]['subject'].unique()
-            
-            for subject in course_subjects:
-                idx = subject_to_idx[subject]
-                subject_embeddings[idx] += embedding
-                subject_counts[idx] += 1
-        
-        # Compute means (avoid division by zero)
-        for i in range(len(self.subjects)):
-            if subject_counts[i] > 0:
-                subject_embeddings[i] /= subject_counts[i]
+        # Group by subject and compute means
+        for subj_idx, subject in enumerate(self.subjects):
+            course_indices = list(self.subject_to_course_indices[subject])
+            if course_indices:
+                # Vectorized mean computation
+                subject_embeddings[subj_idx] = self.course_embeddings_matrix[course_indices].mean(axis=0)
         
         return subject_embeddings
     
-    def _count_courses_by_subject(self, known_state: KnownState) -> pd.DataFrame:
+    def _count_courses_by_subject(self, known_state: KnownState) -> pl.DataFrame:
         """
         Count courses taken by subject and level.
         
@@ -135,272 +160,245 @@ class CoursePlan(Game):
         
         Returns:
             DataFrame with columns [subject, level, count]
-            where level is 0 (intro), 1 (intermediate), or 2 (advanced)
         """
-        # Flatten all course IDs from all quarters
-        all_course_ids = []
-        for quarter in known_state:
-            all_course_ids.extend(quarter)
+        # Flatten all course IDs using comprehension (faster than nested loop)
+        all_course_ids = [cid for quarter in known_state for cid in quarter]
         
         if not all_course_ids:
-            # Return empty dataframe with correct schema
-            return pd.DataFrame(columns=['subject', 'level', 'count'])
+            return pl.DataFrame(schema={'subject': pl.Utf8, 'level': pl.Int64, 'count': pl.UInt32})
         
-        # Filter course_codes to taken courses
-        taken = self.course_codes[self.course_codes['id'].isin(all_course_ids)]
-        
-        # Count by subject and level
-        counts = taken.groupby(['subject', 'level']).size().reset_index(name='count')
+        # Vectorized filtering and grouping
+        counts = (
+            self.course_codes
+            .filter(pl.col('id').is_in(all_course_ids))
+            .group_by(['subject', 'level'])
+            .agg(pl.len().alias('count'))
+        )
         
         return counts
     
     def actions(self, belief_state: BeliefState) -> List[Tuple[int, ...]]:
         """
-        Get list of valid quarters (groups of 4 courses) that can be taken.
-        
-        Eligibility criteria:
-        - Intro courses (level 0): always available
-        - Intermediate courses (level 1): need 3+ intro courses in that subject
-        - Advanced courses (level 2): need 2+ intermediate courses in that subject
-        
-        Args:
-            belief_state: Current belief state (contains belief over interests and course history)
-        
-        Returns:
-            List of quarters, where each quarter is a tuple of 4 course IDs
+        Get list of valid quarters (groups of courses) that can be taken.
         """
-        # Extract known state from belief state
         known_state = belief_state.known_state
 
         if len(known_state) == self.MAX_QUARTERS:
-            # Max quarters reached
             return []
         
-        # Get courses already taken
-        taken_course_ids = set()
-        for quarter in known_state:
-            taken_course_ids.update(quarter)
+        quarters_taken = len(known_state)
+        in_first_half = quarters_taken < self.MAX_QUARTERS / 2
+        
+        min_units = 9 if in_first_half else 13
+        max_units = 15 if in_first_half else 19
+        
+        # Flatten taken courses (vectorized)
+        taken_course_ids = set(cid for quarter in known_state for cid in quarter)
         
         # Get prerequisite counts
         counts = self._count_courses_by_subject(known_state)
+        prereq_counts = {(row['subject'], row['level']): row['count'] 
+                        for row in counts.iter_rows(named=True)}
         
-        # Create lookup dict: (subject, level) -> count
-        prereq_counts = {}
-        for _, row in counts.iterrows():
-            key = (row['subject'], row['level'])
-            prereq_counts[key] = row['count']
-        
-        # Find eligible courses
+        # Find eligible courses using pre-computed mappings
         eligible_by_subject = {subject: set() for subject in self.subjects}
         
         # Intro (level 0) always eligible
-        for _, row in self.course_codes[self.course_codes['level'] == 0].iterrows():
-            if row['id'] not in taken_course_ids:
-                eligible_by_subject[row['subject']].add(row['id'])
+        for subject in self.subjects:
+            intro_indices = self.subject_level_to_course_indices[(subject, 0)]
+            eligible_by_subject[subject].update(
+                self.course_ids[idx] for idx in intro_indices 
+                if self.course_ids[idx] not in taken_course_ids
+            )
         
         # Intermediate + Advanced based on prerequisites
         for subject in self.subjects:
             intro_count = prereq_counts.get((subject, 0), 0)
             intermediate_count = prereq_counts.get((subject, 1), 0)
             
-            # Intermediate requires 3+ intro
             if intro_count >= 3:
-                df_inter = self.course_codes[
-                    (self.course_codes['subject'] == subject) & 
-                    (self.course_codes['level'] == 1)
-                ]
-                for _, row in df_inter.iterrows():
-                    if row['id'] not in taken_course_ids:
-                        eligible_by_subject[subject].add(row['id'])
+                inter_indices = self.subject_level_to_course_indices[(subject, 1)]
+                eligible_by_subject[subject].update(
+                    self.course_ids[idx] for idx in inter_indices 
+                    if self.course_ids[idx] not in taken_course_ids
+                )
                 
-                # Advanced requires 2+ intermediate
-                if intermediate_count >= 2:
-                    df_adv = self.course_codes[
-                        (self.course_codes['subject'] == subject) & 
-                        (self.course_codes['level'] == 2)
-                    ]
-                    for _, row in df_adv.iterrows():
-                        if row['id'] not in taken_course_ids:
-                            eligible_by_subject[subject].add(row['id'])
+                if intermediate_count >= 3:
+                    adv_indices = self.subject_level_to_course_indices[(subject, 2)]
+                    eligible_by_subject[subject].update(
+                        self.course_ids[idx] for idx in adv_indices 
+                        if self.course_ids[idx] not in taken_course_ids
+                    )
 
         # Belief distribution over subjects
         belief = np.array(belief_state.belief)
 
-        # Create sampling pool: subjects with at least 1 eligible course
+        # Vectorized belief adjustment
         valid_subjects = [s for s in self.subjects if len(eligible_by_subject[s]) > 0]
-        if len(valid_subjects) == 0:
+        if not valid_subjects:
             return []
         
-        # Adjust belief to zero out subjects with no eligible courses
-        adjusted_belief = np.array([
-            belief[i] if self.subjects[i] in valid_subjects else 0.0 for i in range(len(self.subjects))
-        ])  
+        # Create mask and apply in one operation
+        subject_mask = np.array([self.subjects[i] in valid_subjects for i in range(len(self.subjects))])
+        adjusted_belief = belief * subject_mask
         adjusted_belief = adjusted_belief / adjusted_belief.sum()
         
-        # Naive sampling: generate random quarters of 4 courses
-        # Sample up to 4 random quarters (or fewer if not enough eligible courses)
+        # Build quarters
         quarters = []
-        n_samples = min(self.num_actions(len(belief_state.known_state)), sum(len(v) for v in eligible_by_subject.values()) // 4)
+        n_samples = self.num_actions(quarters_taken)
         
-        for _ in range(n_samples):
+        while len(quarters) < n_samples:
             quarter_courses = []
+            total_units = 0
             
-            for _ in range(4):
-                # Sample a subject
+            while True:
                 subject_idx = np.random.choice(len(self.subjects), p=adjusted_belief)
                 subject = self.subjects[subject_idx]
                 
-                # Get eligible non-used courses for subject
                 available = eligible_by_subject[subject] - set(quarter_courses)
                 if not available:
-                    break  # cannot complete this quarter, skip it
+                    continue
                 
-                # Uniformly choose an eligible course within the subject
-                # Convert set to list for np.random.choice
                 course = np.random.choice(list(available))
+                course_units = self.course_metadata[course]['units']
+                
+                if total_units + course_units > max_units:
+                    continue
+                
                 quarter_courses.append(course)
+                total_units += course_units
+                
+                if total_units > max_units - 3:
+                    break
+                
+                if total_units >= min_units and np.random.random() < 0.45:
+                    break
             
-            # Only accept full quarters
-            if len(quarter_courses) == 4:
+            if total_units >= min_units:
                 quarters.append(tuple(sorted(quarter_courses)))
         
         return quarters
     
     def num_actions(self, quarters_taken) -> int:
-        """
-        Calculate number of actions to sample (quarters). We want more options at the start, less towards the end.
-        
-        Returns:
-            Number of possible quarters (combinations of 4 courses)
-        """
-        actions_per_q = {
-            0 :10,
-            1: 8, 
-            2: 6, 
-            3: 5, 
-            4: 4, 
-            5: 4, 
-            6: 4, 
-            7: 3, 
-            8: 3, 
-            9: 3, 
-            10: 4, 
-            11: 5
-        }
+        """Calculate number of actions to sample (quarters)."""
+        actions_per_q = {0: 10, 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 
+                        6: 4, 7: 4, 8: 4, 9: 4, 10: 6, 11: 12}
         return actions_per_q[quarters_taken]
     
     def reward(self, state: State, action: Tuple[int, ...]) -> float:
         """
-        Get reward for taking a quarter of courses (action) from a state.
-        
-        - Alignment between student's uncertain interest (state.uncertain) and course subject
-        - Course quality/value
-        - Progress towards degree requirements
-        
-        Args:
-            state: Complete state (uncertain interest + known history)
-            action: Quarter (tuple of course IDs) to take
-        
-        Returns:
-            Reward value
+        Get reward for taking a quarter of courses (vectorized).
         """
-        total = 0.0
-        course_ids = action
-               
-
-        # for each course_id
+        course_ids = np.array(action, dtype=np.int32)
+        
+        # Get indices for all courses at once
+        course_indices = np.array([self.course_id_to_idx[cid] for cid in course_ids])
+        
+        # Vectorized distance computation
+        student_embedding = self.subject_embeddings[state.uncertain]
+        course_embeddings = self.course_embeddings_matrix[course_indices]
+        
+        # Compute all distances at once: ||student - course||
+        distances = np.linalg.norm(course_embeddings - student_embedding, axis=1)
+        
+        # Get units for all courses at once
+        course_units = self.course_units[course_indices]
+        
+        # Vectorized enjoyment calculation
+        enjoyment = -np.sum(distances * course_units)
+        
+        # Track subjects in this quarter
+        subjects_in_quarter = set()
         for course_id in course_ids:
-            # Get the course data using index-based lookup (O(1))
-            course_embedding = self.courses.loc[course_id, 'embedding']
-            units = self.courses.loc[course_id, 'units']
+            course_subjects = (
+                self.course_codes
+                .filter(pl.col('id') == course_id)
+                .select('subject')
+                .unique()
+                .to_series()
+                .to_list()
+            )
+            subjects_in_quarter.update(course_subjects)
 
-            # 1. compute euclidean distance between self.true_pref and this courses' embedding
-            distance = np.linalg.norm(self.subject_embeddings[state.uncertain] - course_embedding)
-            # Negative distance as reward
-            total -= distance * units
+        # Scale enjoyment
+        num_courses = len(course_ids)
+        # Extend known state with current action for calculations
+        extended_known = state.known + (action,)
+        quarters_taken = len(extended_known)
+        in_first_half = quarters_taken < self.MAX_QUARTERS / 2
+        
+        scaling_factor = 1 + ((num_courses + (1 if in_first_half else 0)) / 10)
+        total = enjoyment * scaling_factor
+        
+        # Penalty for single-subject quarters
+        if len(subjects_in_quarter) == 1:
+            total -= 40
 
+        # Bonus for completing a major
+        if quarters_taken == self.MAX_QUARTERS:
+            taken_course_ids = set(cid for quarter in extended_known for cid in quarter)
 
-        # Bonus for completing a major (taking 12 courses in one subject, including 2 advanced)
-        if len(state.known) == self.MAX_QUARTERS:
-            taken_course_ids = set()
-            for quarter in state.known:
-                taken_course_ids.update(quarter)
-            taken_course_by_subject = self._count_courses_by_subject(state.known)
-
-            num_advanced_by_subject = defaultdict(int)
-            for _, row in taken_course_by_subject.iterrows():
-                if row['level'] == 2:
-                    num_advanced_by_subject[row['subject']] += row['count']
+            # Vectorized units calculation
+            taken_indices = np.array([self.course_id_to_idx[cid] for cid in taken_course_ids])
+            num_units_taken = np.sum(self.course_units[taken_indices])
             
-            for subject, count in taken_course_ids.items():
-                if count >= 12 and num_advanced_by_subject[subject] >= 2: # 12 classes to complete a major, 2 advanced
-                    total += 300
+            if num_units_taken >= self.MAX_QUARTERS * 15 - (4 * self.MAX_QUARTERS / 2):
+                taken_course_by_subject = self._count_courses_by_subject(extended_known)
 
+                num_advanced_by_subject = defaultdict(int)
+                for row in taken_course_by_subject.iter_rows(named=True):
+                    if row['level'] == 2:
+                        num_advanced_by_subject[row['subject']] += row['count']
+                
+                for subject, count in num_advanced_by_subject.items():
+                    if count >= 10 and num_advanced_by_subject[subject] >= 2:
+                        total += 500
+                        break
         
         return total
     
     def observation_probs(self, action: Tuple[int, ...]) -> np.ndarray:
         """
-        Get observation probability matrix for taking a quarter of courses.
-        
-        After taking a quarter, we observe which subjects the courses belong to.
-        
-        Args:
-            action: Quarter (tuple of course IDs) being taken
-        
-        Returns:
-            Matrix of shape (n_observations, n_uncertain_states) where entry [i, j] is
-            P(observation=i | uncertain_state=j, action)
+        Get observation probability matrix (fully vectorized).
         """
         n_subjects = len(self.subjects)
-        sigma = 1.5  # Observation noise parameter (can be tuned)
+        sigma = 1.55
         
-        # Get embeddings for all courses in the quarter
-        course_embeddings = []
-        for course_id in action:
-            course_embeddings.append(self.courses.loc[course_id, 'embedding'])
+        # Get course indices and embeddings (vectorized)
+        course_indices = np.array([self.course_id_to_idx[cid] for cid in action])
+        course_embeddings = self.course_embeddings_matrix[course_indices]  # Shape: (n_courses, embed_dim)
         
-        # Initialize probability matrix: P(obs=i | state=j, action)
-        # Shape: (n_observations, n_uncertain_states)
+        # Compute all distances at once
+        # subject_embeddings: (n_subjects, embed_dim)
+        # course_embeddings: (n_courses, embed_dim)
+        
+        # Expand dimensions for broadcasting
+        # subject_embeddings_expanded: (n_subjects, 1, embed_dim)
+        # course_embeddings_expanded: (1, n_courses, embed_dim)
+        subject_expanded = self.subject_embeddings[:, np.newaxis, :]
+        course_expanded = course_embeddings[np.newaxis, :, :]
+        
+        # Compute all pairwise distances: (n_subjects, n_courses)
+        all_distances = np.linalg.norm(subject_expanded - course_expanded, axis=2)
+        
+        # For each true state, compute observation probabilities
         obs_probs = np.zeros((n_subjects, n_subjects))
         
-        # For each true state (student's true interest)
-        for state_idx, true_subject in enumerate(self.subjects):
-            true_embedding = self.subject_embeddings[state_idx]
-            
-            # Compute distances from true interest to each course
-            true_distances = []
-            for course_emb in course_embeddings:
-                dist = np.linalg.norm(true_embedding - course_emb)
-                true_distances.append(dist)
-            
-            # For each possible observation
-            for obs_idx, obs_subject in enumerate(self.subjects):
-                obs_embedding = self.subject_embeddings[obs_idx]
-                
-                # Compute distances from observed subject to each course
-                obs_distances = []
-                for course_emb in course_embeddings:
-                    dist = np.linalg.norm(obs_embedding - course_emb)
-                    obs_distances.append(dist)
-                
-                # Compute log probability (for numerical stability)
-                # P(o | s, a) ∝ exp(-1/(2σ²) * Σ(d(v_o, e_i) - d(v_s, e_i))²)
-                sum_squared_diff = 0.0
-                for i in range(len(course_embeddings)):
-                    diff = obs_distances[i] - true_distances[i]
-                    sum_squared_diff += diff ** 2
-                
-                log_prob = -sum_squared_diff / (2 * sigma ** 2)
-                obs_probs[obs_idx, state_idx] = log_prob
-        
-        # Convert from log probabilities to probabilities and normalize
-        # For numerical stability, subtract max before exponentiating
         for state_idx in range(n_subjects):
-            log_probs = obs_probs[:, state_idx]
+            true_distances = all_distances[state_idx]  # Shape: (n_courses,)
+            
+            # Vectorized computation of squared differences
+            # obs_distances: (n_subjects, n_courses)
+            # true_distances: (n_courses,)
+            diff_matrix = all_distances - true_distances  # Broadcasting
+            sum_squared_diff = np.sum(diff_matrix ** 2, axis=1)  # Shape: (n_subjects,)
+            
+            # Compute log probabilities
+            log_probs = -sum_squared_diff / (2 * sigma ** 2)
+            
+            # Convert to probabilities (numerically stable)
             max_log_prob = np.max(log_probs)
             probs = np.exp(log_probs - max_log_prob)
-            # Normalize to sum to 1
             obs_probs[:, state_idx] = probs / np.sum(probs)
         
         return obs_probs
@@ -408,15 +406,5 @@ class CoursePlan(Game):
     def transition(self, known_state: KnownState, action: Tuple[int, ...]) -> KnownState:
         """
         Update known state after taking a quarter of courses.
-        
-        Adds the quarter to the known_state history.
-        
-        Args:
-            known_state: Current history of quarters with course IDs
-            action: Quarter (tuple of course IDs) being taken
-        
-        Returns:
-            New known state with quarter added
         """
-        # Add the quarter to the history
         return known_state + (action,)
